@@ -51,6 +51,21 @@ class GuardrailState:
         # catch orders priced wildly off-market.
         self._last_price: dict[str, float] = {}
 
+        # Judge/dashboard-facing observability: a rolling log of recent
+        # decisions plus running counters. Capped so it can't grow unbounded
+        # in a long-running demo.
+        self._recent_decisions: Deque[dict] = deque(maxlen=200)
+        self._total_orders: int = 0
+        self._total_allowed: int = 0
+        self._rejections_by_check: dict[str, int] = {}
+
+        # Kill switch: distinct from the loss-driven circuit breaker so the
+        # dashboard/API can tell "an operator hit the button" apart from
+        # "the risk engine tripped on its own".
+        self._kill_switch_engaged: bool = False
+        self._kill_switch_reason: str = ""
+        self._kill_switch_at: Optional[float] = None
+
     # ---------------- Dedup ----------------
 
     async def check_and_record_order_id(self, client_order_id: str, window_seconds: int) -> bool:
@@ -156,6 +171,59 @@ class GuardrailState:
     async def get_last_price(self, symbol: str) -> Optional[float]:
         async with self._lock:
             return self._last_price.get(symbol)
+
+    # ---------------- Observability (decision log + counters) ----------------
+
+    async def record_decision(self, decision_dict: dict) -> None:
+        async with self._lock:
+            self._recent_decisions.append(decision_dict)
+            self._total_orders += 1
+            if decision_dict.get("allowed"):
+                self._total_allowed += 1
+            else:
+                for c in decision_dict.get("checks", []):
+                    if c.get("status") == "REJECT":
+                        self._rejections_by_check[c["check"]] = self._rejections_by_check.get(c["check"], 0) + 1
+                        break  # only the first rejection is the actual cause (pipeline short-circuits)
+
+    async def get_stats(self) -> dict:
+        async with self._lock:
+            return {
+                "total_orders": self._total_orders,
+                "total_allowed": self._total_allowed,
+                "total_blocked": self._total_orders - self._total_allowed,
+                "rejections_by_check": dict(self._rejections_by_check),
+            }
+
+    async def get_recent_decisions(self, limit: int = 25) -> list[dict]:
+        async with self._lock:
+            return list(self._recent_decisions)[-limit:][::-1]  # newest first
+
+    # ---------------- Kill switch ----------------
+
+    async def engage_kill_switch(self, reason: str) -> None:
+        async with self._lock:
+            self._kill_switch_engaged = True
+            self._kill_switch_reason = reason
+            self._kill_switch_at = time.time()
+
+    async def disengage_kill_switch(self) -> None:
+        async with self._lock:
+            self._kill_switch_engaged = False
+            self._kill_switch_reason = ""
+            self._kill_switch_at = None
+
+    async def kill_switch_status(self) -> dict:
+        async with self._lock:
+            return {
+                "engaged": self._kill_switch_engaged,
+                "reason": self._kill_switch_reason,
+                "engaged_at": self._kill_switch_at,
+            }
+
+    @property
+    def kill_switch_engaged(self) -> bool:
+        return self._kill_switch_engaged
 
 
 # Single shared instance for the whole process.

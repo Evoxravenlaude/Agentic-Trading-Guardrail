@@ -88,6 +88,10 @@ class GuardrailDecision:
             "request_id": self.order.request_id,
             "client_order_id": self.order.client_order_id,
             "agent_id": self.order.agent_id,
+            "symbol": self.order.symbol,
+            "side": self.order.side.value,
+            "quantity": self.order.quantity,
+            "price": self.order.price,
             "allowed": self.allowed,
             "checks": [
                 {"check": r.check_name, "status": r.status.value, "reason": r.reason, "details": r.details}

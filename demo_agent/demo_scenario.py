@@ -97,6 +97,19 @@ def scenario_circuit_breaker() -> None:
     result = place_order(PROXY_URL, "BTCUSDT", "BUY", 0.01, price=60000.0, order_type="LIMIT")
     print("Next order attempt after the loss streak:")
     show(result)
+    httpx.post(f"{PROXY_URL}/breaker/reset", timeout=10)
+    print("  (breaker manually reset for the next scenario)")
+
+
+def scenario_kill_switch() -> None:
+    banner("6. Manual kill switch — an operator halt, independent of the automatic circuit breaker")
+    httpx.post(f"{PROXY_URL}/kill-switch/engage", json={"reason": "suspected compromised agent"}, timeout=10)
+    print("  operator engaged the kill switch")
+    result = place_order(PROXY_URL, "BTCUSDT", "BUY", 0.01, price=60000.0, order_type="LIMIT")
+    print("Order attempt while the kill switch is engaged:")
+    show(result)
+    httpx.post(f"{PROXY_URL}/kill-switch/disengage", timeout=10)
+    print("  operator disengaged the kill switch")
 
 
 def main() -> None:
@@ -106,7 +119,9 @@ def main() -> None:
     scenario_oversized_order()
     scenario_rapid_fire_loop()
     scenario_circuit_breaker()
+    scenario_kill_switch()
     banner("Done")
+    print(f"\nOpen {PROXY_URL}/dashboard in a browser for a live view of everything that just happened.")
 
 
 if __name__ == "__main__":

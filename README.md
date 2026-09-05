@@ -10,11 +10,22 @@ dangerous — regardless of what strategy or agent is driving it.
 
 It's infrastructure, not a strategy: it works underneath any agent.
 
+**Why this matters:** Binance's own guardrail on Agent OS is the
+no-withdrawal sub-account — it stops an agent from draining funds to an
+external address. It does not stop an agent from losing money through bad
+trades. Independent coverage of the Agent OS launch put it plainly:
+["the guardrail prevents theft, it does not prevent loss,"](https://crypto.news/binance-agent-os-ai-trading-safeguards/)
+and noted that crypto agent trading currently lacks the position limits and
+kill switches that regulated brokers and algorithmic trading firms are
+required to have. This project is that missing layer.
+
 ```
 [Any trading agent] → wants to place an order
         ↓ HTTP POST /trade
 [Guardrail layer]  ← intercepts every trade call before it reaches Binance
+   • kill switch (operator-triggered halt, independent of the breaker)
    • sanity check (reject nonsensical price/size, e.g. float errors)
+   • symbol allowlist (refuse hallucinated/unapproved assets)
    • circuit breaker (halt on loss streak / drawdown; manual reset only)
    • position-size cap (reject if order exceeds max % of account)
    • dedup / idempotency check (reject duplicate orders from retries/reconnects)
@@ -22,6 +33,11 @@ It's infrastructure, not a strategy: it works underneath any agent.
         ↓ if all pass
 [Binance Agent OS MCP server] (Agentic sub-account)
 ```
+
+A live `/dashboard` page shows all of this happening in real time — kill
+switch and breaker status, running counts, and the most recent decisions
+with per-check pass/fail — so a judge (or you, on a call) can watch it
+work without running curl commands.
 
 ## Why this, and why these checks
 
@@ -38,6 +54,8 @@ classes directly instead of trying to out-predict the market.
 | Runaway loops | A buggy agent gets stuck spamming orders | Rate limiter caps orders per minute (global + per-symbol) |
 | No circuit breaker | Naive agent wrappers keep trading through a losing streak | Breaker halts activity after N consecutive losses or a drawdown breach; requires manual reset |
 | Oversized positions | Agent sizes a position too large for the account | Position-size cap rejects orders over X% of balance |
+| Hallucinated/unapproved assets | LLM misreads a symbol, invents a plausible one, or gets steered by a prompt injection into a token the operator never approved | Symbol allowlist rejects anything outside a configured set (opt-in — empty allowlist means unrestricted) |
+| No kill switch | An operator notices something wrong (compromised agent, bad deploy, market event) but has no single control to halt everything immediately | `/kill-switch/engage` halts all order flow instantly, independent of the loss-driven circuit breaker, until explicitly disengaged |
 
 The dedup/reconnect problem here is structurally the same one already
 solved for Telegram/Solana bot session handling
@@ -60,11 +78,15 @@ orders instead of duplicate bot instances.
 - **Circuit breaker never auto-resumes.** Once tripped, it stays tripped
   until an explicit `POST /breaker/reset`. A losing streak is exactly the
   situation where you don't want a naive timer to start trading again.
-- **Short-circuiting pipeline.** Checks run cheapest/most-disqualifying
-  first (sanity → circuit breaker → position size → dedup → rate limit)
-  and stop at the first rejection. A malformed order never consumes rate
-  limit budget or gets recorded as a dedup key — it's not a "real" order
-  attempt from the account's perspective.
+- **Short-circuiting pipeline.** Checks run in order — kill switch →
+  sanity → symbol allowlist → circuit breaker → position size → dedup →
+  rate limit — and stop at the first rejection. A malformed order never
+  consumes rate limit budget or gets recorded as a dedup key — it's not a
+  "real" order attempt from the account's perspective.
+- **Kill switch is separate from the circuit breaker.** The breaker trips
+  itself automatically on losses; the kill switch is an operator action
+  for anything else (a suspected compromise, a bad deploy, a market
+  event) and never auto-resumes either.
 
 ## Project layout
 
@@ -135,6 +157,7 @@ environment variables:
 | `GUARDRAIL_MAX_ORDERS_PER_MINUTE` | `10` | Global rate limit |
 | `GUARDRAIL_MAX_ORDERS_PER_SYMBOL_PER_MINUTE` | `5` | Per-symbol rate limit |
 | `GUARDRAIL_MAX_PRICE_DEVIATION_PCT` | `0.20` | Max deviation from last known market price before sanity check rejects |
+| `GUARDRAIL_ALLOWED_SYMBOLS` | *(empty — unrestricted)* | Comma-separated symbol allowlist, e.g. `BTCUSDT,ETHUSDT` |
 | `GUARDRAIL_FALLBACK_BALANCE` | `10000` | Balance used when no live balance is available (dry-run/demo) |
 | `BINANCE_MCP_URL` | `https://agent.binance.com/mcp/agentic` | MCP server endpoint |
 | `GUARDRAIL_DRY_RUN` | `true` | Simulate fills instead of connecting to Binance |
@@ -152,6 +175,12 @@ environment variables:
 - `POST /market-price` — push a reference price for a symbol (used by the
   sanity deviation check and as a MARKET-order fallback price).
 - `POST /account-balance` — seed the account balance in dry-run/demo mode.
+- `POST /kill-switch/engage` — operator halt; blocks all order flow immediately regardless of cause.
+- `POST /kill-switch/disengage` — clear the kill switch.
+- `GET /kill-switch/status` — current kill switch state.
+- `GET /stats` — running totals: orders received, allowed, blocked, broken down by which check blocked them.
+- `GET /decisions?limit=25` — the most recent decisions, newest first, with full per-check detail.
+- `GET /dashboard` — a live HTML view of all of the above, polling every 2 seconds. No build step, no external dependencies.
 - `GET /health` — liveness + current config mode.
 
 ## Next steps (out of scope for this build)

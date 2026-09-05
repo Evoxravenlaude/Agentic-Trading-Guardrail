@@ -43,6 +43,12 @@ class GuardrailConfig:
     max_orders_per_minute: int = _int_env("GUARDRAIL_MAX_ORDERS_PER_MINUTE", 10)
     max_orders_per_symbol_per_minute: int = _int_env("GUARDRAIL_MAX_ORDERS_PER_SYMBOL_PER_MINUTE", 5)
 
+    # --- Symbol allowlist ---
+    # Comma-separated list, e.g. "BTCUSDT,ETHUSDT". Empty = allow everything.
+    allowed_symbols: frozenset[str] = frozenset(
+        s.strip() for s in os.environ.get("GUARDRAIL_ALLOWED_SYMBOLS", "").split(",") if s.strip()
+    )
+
     # --- Sanity check ---
     min_price: float = _float_env("GUARDRAIL_MIN_PRICE", 0.0000001)
     max_price: float = _float_env("GUARDRAIL_MAX_PRICE", 10_000_000.0)
