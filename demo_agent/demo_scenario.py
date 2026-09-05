@@ -4,6 +4,10 @@ Run against a live guardrail proxy (`uvicorn guardrail.proxy:app`) with:
 
     python -m demo_agent.demo_scenario
 
+Or against a deployed instance (e.g. Railway):
+
+    PROXY_URL=https://your-app.up.railway.app python -m demo_agent.demo_scenario
+
 Walks through, in order:
   1. A normal order — passes, gets forwarded (simulated fill in dry-run).
   2. The SAME order fired again immediately — blocked by dedup.
@@ -12,6 +16,7 @@ Walks through, in order:
      rate limiter partway through.
   5. Three consecutive losing trades reported — trips the circuit breaker;
      the next order attempt is blocked outright.
+  6. A manual kill switch engagement — halts everything until disengaged.
 
 Each step prints the guardrail's JSON decision so the "blocked here" line
 is visible on camera without needing to read logs.
@@ -19,6 +24,7 @@ is visible on camera without needing to read logs.
 
 from __future__ import annotations
 
+import os
 import time
 import uuid
 
@@ -26,7 +32,7 @@ import httpx
 
 from demo_agent.agent import place_order
 
-PROXY_URL = "http://localhost:8000"
+PROXY_URL = os.environ.get("PROXY_URL", "http://localhost:8000")
 
 
 def banner(title: str) -> None:

@@ -17,7 +17,7 @@ from contextlib import asynccontextmanager
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
 from guardrail.checks import run_all_checks
@@ -41,6 +41,11 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Agentic Trading Guardrail Layer", lifespan=lifespan)
+
+
+@app.get("/", include_in_schema=False)
+async def root() -> RedirectResponse:
+    return RedirectResponse(url="/dashboard")
 
 
 # ---------------- Request/response schemas ----------------

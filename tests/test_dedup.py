@@ -56,12 +56,17 @@ async def test_different_client_order_ids_both_pass(cfg, st):
 
 
 async def test_fallback_key_dedups_close_retries_without_client_order_id(cfg, st):
+    # Use a fixed, boundary-safe timestamp instead of time.time() so this
+    # test doesn't flake depending on where the wall clock lands relative
+    # to the 2-second bucket used by derive_fallback_key.
+    fixed_start = 1_700_000_000.0  # arbitrary, comfortably mid-bucket
     order1 = OrderRequest(
         symbol="BTCUSDT", side=OrderSide.BUY, order_type=OrderType.LIMIT, quantity=0.01, price=60000.0,
+        received_at=fixed_start,
     )
     order2 = OrderRequest(
         symbol="BTCUSDT", side=OrderSide.BUY, order_type=OrderType.LIMIT, quantity=0.01, price=60000.0,
-        received_at=order1.received_at + 0.5,  # fires half a second later, same bucket
+        received_at=fixed_start + 0.5,  # fires half a second later, same 2s bucket
     )
     r1 = await check_dedup(order1, st, cfg)
     r2 = await check_dedup(order2, st, cfg)
