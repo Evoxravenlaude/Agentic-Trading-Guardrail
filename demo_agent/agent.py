@@ -26,6 +26,8 @@ def place_order(
     order_type: str = "MARKET",
     agent_id: str = "demo-agent",
     client_order_id: str | None = None,
+    timeout: float = 30,
+    retries: int = 2,
 ) -> dict:
     payload = {
         "symbol": symbol,
@@ -36,9 +38,17 @@ def place_order(
         "agent_id": agent_id,
         "client_order_id": client_order_id,
     }
-    resp = httpx.post(f"{proxy_url}/trade", json=payload, timeout=10)
-    resp.raise_for_status()
-    return resp.json()
+    last_exc: Exception | None = None
+    for attempt in range(retries + 1):
+        try:
+            resp = httpx.post(f"{proxy_url}/trade", json=payload, timeout=timeout)
+            resp.raise_for_status()
+            return resp.json()
+        except (httpx.TimeoutException, httpx.TransportError) as exc:
+            last_exc = exc
+            if attempt < retries:
+                print(f"  (network hiccup calling /trade, retrying {attempt + 1}/{retries}...)")
+    raise last_exc  # type: ignore[misc]
 
 
 def main() -> None:
