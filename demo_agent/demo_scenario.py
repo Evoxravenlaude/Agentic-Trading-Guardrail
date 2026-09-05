@@ -54,9 +54,16 @@ def show(result: dict) -> None:
 
 
 def setup() -> None:
-    httpx.post(f"{PROXY_URL}/market-price", json={"symbol": "BTCUSDT", "price": 60000.0}, timeout=10)
-    httpx.post(f"{PROXY_URL}/account-balance", params={"balance": 10000.0}, timeout=10)
-    httpx.post(f"{PROXY_URL}/breaker/reset", timeout=10)
+    for attempt in range(3):
+        try:
+            httpx.post(f"{PROXY_URL}/market-price", json={"symbol": "BTCUSDT", "price": 60000.0}, timeout=30)
+            httpx.post(f"{PROXY_URL}/account-balance", params={"balance": 10000.0}, timeout=30)
+            httpx.post(f"{PROXY_URL}/breaker/reset", timeout=30)
+            return
+        except (httpx.TimeoutException, httpx.TransportError) as exc:
+            if attempt == 2:
+                raise
+            print(f"  (network hiccup during setup, retrying {attempt + 1}/2...)")
 
 
 def scenario_normal_order() -> None:
@@ -98,23 +105,23 @@ def scenario_rapid_fire_loop() -> None:
 def scenario_circuit_breaker() -> None:
     banner("5. Three consecutive losing trades — circuit breaker should trip and halt further orders")
     for i in range(3):
-        httpx.post(f"{PROXY_URL}/trade-outcome", json={"symbol": "BTCUSDT", "pnl": -50.0}, timeout=10)
+        httpx.post(f"{PROXY_URL}/trade-outcome", json={"symbol": "BTCUSDT", "pnl": -50.0}, timeout=30)
         print(f"  reported losing trade {i + 1}")
     result = place_order(PROXY_URL, "BTCUSDT", "BUY", 0.01, price=60000.0, order_type="LIMIT")
     print("Next order attempt after the loss streak:")
     show(result)
-    httpx.post(f"{PROXY_URL}/breaker/reset", timeout=10)
+    httpx.post(f"{PROXY_URL}/breaker/reset", timeout=30)
     print("  (breaker manually reset for the next scenario)")
 
 
 def scenario_kill_switch() -> None:
     banner("6. Manual kill switch — an operator halt, independent of the automatic circuit breaker")
-    httpx.post(f"{PROXY_URL}/kill-switch/engage", json={"reason": "suspected compromised agent"}, timeout=10)
+    httpx.post(f"{PROXY_URL}/kill-switch/engage", json={"reason": "suspected compromised agent"}, timeout=30)
     print("  operator engaged the kill switch")
     result = place_order(PROXY_URL, "BTCUSDT", "BUY", 0.01, price=60000.0, order_type="LIMIT")
     print("Order attempt while the kill switch is engaged:")
     show(result)
-    httpx.post(f"{PROXY_URL}/kill-switch/disengage", timeout=10)
+    httpx.post(f"{PROXY_URL}/kill-switch/disengage", timeout=30)
     print("  operator disengaged the kill switch")
 
 
